@@ -4,6 +4,30 @@
 from collections import namedtuple
 Item = namedtuple("Item", ['index', 'value', 'weight'])
 
+
+def brute_force_solution(items, capacity):
+    max_value = 0
+    taken = 0
+    item_count = len(items)
+
+    for mask in range(2 ** item_count):
+        weight = 0
+        value = 0
+        current_mask = mask
+        for i in reversed(items):
+            if current_mask % 2 == 1:
+                weight += i.weight
+                value += i.value
+            current_mask //= 2
+        if weight <= capacity and value > max_value:
+            max_value = value
+            taken = mask
+
+    output_data = str(max_value) + ' 1\n' + \
+        ' '.join(list(format(taken, f'#0{item_count + 2}b')[2:]))
+    return output_data
+
+
 def solve_it(input_data):
     # Modify this code to run your optimization algorithm
 
@@ -21,6 +45,9 @@ def solve_it(input_data):
         parts = line.split()
         items.append(Item(i-1, int(parts[0]), int(parts[1])))
 
+    if item_count <= 22:
+        return brute_force_solution(items, capacity)
+
     # a trivial algorithm for filling the knapsack
     # it takes items in-order until the knapsack is full
     value = 0
@@ -32,7 +59,7 @@ def solve_it(input_data):
             taken[item.index] = 1
             value += item.value
             weight += item.weight
-    
+
     # prepare the solution in the specified output format
     output_data = str(value) + ' ' + str(0) + '\n'
     output_data += ' '.join(map(str, taken))
@@ -48,4 +75,3 @@ if __name__ == '__main__':
         print(solve_it(input_data))
     else:
         print('This test requires an input file.  Please select one from the data directory. (i.e. python solver.py ./data/ks_4_0)')
-
