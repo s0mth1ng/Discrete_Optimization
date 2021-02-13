@@ -1,6 +1,9 @@
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <numeric>
+#include <queue>
 #include <string>
 #include <vector>
 
@@ -93,20 +96,77 @@ Solution dpSolution(const std::vector<Item>& items, uint64_t capacity) {
                   .taken = taken};
 }
 
-Solution defaultSolution(const std::vector<Item>& items, uint64_t capacity) {
+Solution defaultSolution(std::vector<Item>& items, uint64_t capacity) {
+  // greedy algo
   size_t itemCount = items.size();
   std::vector<bool> taken(itemCount, false);
   uint64_t weight = 0, value = 0;
-  for (size_t i = 0; i < itemCount; ++i) {
-    if (weight + items[i].weight <= capacity) {
-      weight += items[i].weight;
-      value += items[i].value;
-      taken[i] = true;
+  std::sort(items.begin(), items.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.value * rhs.weight > lhs.weight * rhs.value;
+  });
+  for (const auto& item : items) {
+    if (weight + item.weight <= capacity) {
+      weight += item.weight;
+      value += item.value;
+      taken[item.index] = true;
     } else {
       break;
     }
   }
   return Solution{.value = value, .isBest = false, .taken = taken};
+}
+
+struct Node {
+  uint64_t value;
+  uint64_t room;
+  uint64_t estimate;
+  std::vector<bool> taken;
+
+  bool operator<(const Node& node) const { return estimate < node.estimate; }
+};
+
+Solution smartSearch(std::vector<Item>& items, uint64_t capacity) {
+  uint64_t estimated = std::accumulate(
+      begin(items), end(items), 0Lu,
+      [](uint64_t sum, const auto& i) { return sum + i.value; });
+  std::sort(items.begin(), items.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.value * rhs.weight > lhs.weight * rhs.value;
+  });
+  std::priority_queue<Node> q;
+  q.push({0Lu, capacity, estimated, {}});
+  uint64_t bestValue = 0;
+  std::vector<bool> bestTaken;
+  size_t counter = 0;
+  while (!q.empty()) {
+    counter++;
+    auto cur = q.top();
+    q.pop();
+    if (cur.value > bestValue) {
+      bestValue = cur.value;
+      bestTaken = cur.taken;
+    }
+    size_t ind = cur.taken.size();
+    if (estimated < bestValue || items.size() == ind || counter >= 4e6) {
+      continue;
+    }
+    auto tmp = cur.taken;
+    if (cur.room >= items[ind].weight) {
+      tmp.push_back(true);
+      q.push({cur.value + items[ind].value, cur.room - items[ind].weight,
+              estimated, tmp});
+      tmp.pop_back();
+    }
+    tmp.push_back(false);
+    q.push({cur.value, cur.room, estimated - items[ind].value, tmp});
+  }
+  while (bestTaken.size() != items.size()) {
+    bestTaken.push_back(false);
+  }
+  std::vector<bool> taken(items.size());
+  for (size_t i = 0; i < items.size(); ++i) {
+    taken[items[i].index] = bestTaken[i];
+  }
+  return {bestValue, false, taken};
 }
 
 Solution solve(std::istream& in) {
@@ -127,7 +187,7 @@ Solution solve(std::istream& in) {
   if (itemCount * capacity < 5e7) {
     return dpSolution(items, capacity);
   }
-
+  return smartSearch(items, capacity);
   return defaultSolution(items, capacity);
 }
 
