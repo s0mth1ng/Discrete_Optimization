@@ -125,40 +125,75 @@ struct Node {
   bool operator<(const Node& node) const { return estimate < node.estimate; }
 };
 
-Solution smartSearch(std::vector<Item>& items, uint64_t capacity) {
+Solution smartSearch(std::vector<Item>& items,
+                     uint64_t capacity,
+                     double part = 0.8,
+                     size_t maxCounter = 100'000) {
   uint64_t estimated = std::accumulate(
       begin(items), end(items), 0Lu,
       [](uint64_t sum, const auto& i) { return sum + i.value; });
   std::sort(items.begin(), items.end(), [](const auto& lhs, const auto& rhs) {
     return lhs.value * rhs.weight > lhs.weight * rhs.value;
   });
-  std::priority_queue<Node> q;
-  q.push({0Lu, capacity, estimated, {}});
+
+  size_t itemCount = items.size();
+  uint64_t weight = 0, value = 0;
+  std::vector<bool> initTaken;
+  if (part > 0) {
+    for (size_t i = 0; i < itemCount; ++i) {
+      if (weight + items[i].weight <= capacity) {
+        weight += items[i].weight;
+        value += items[i].value;
+      } else {
+        size_t upTo = i * part;
+        initTaken.resize(i, false);
+        std::fill(initTaken.begin(), initTaken.begin() + upTo, true);
+        break;
+      }
+    }
+  }
+
   uint64_t bestValue = 0;
   std::vector<bool> bestTaken;
-  size_t counter = 0;
-  while (!q.empty()) {
-    counter++;
-    auto cur = q.top();
-    q.pop();
-    if (cur.value > bestValue) {
-      bestValue = cur.value;
-      bestTaken = cur.taken;
+  do {
+    value = 0;
+    uint64_t curCapacity = capacity;
+    uint64_t curEstimated = estimated;
+    for (size_t i = 0; i < initTaken.size(); ++i) {
+      if (initTaken[i]) {
+        value += items[i].value;
+        curCapacity -= items[i].weight;
+      } else {
+        curEstimated -= items[i].value;
+      }
     }
-    size_t ind = cur.taken.size();
-    if (estimated < bestValue || items.size() == ind || counter >= 4e6) {
-      continue;
+    std::priority_queue<Node> q;
+    q.push({value, curCapacity, curEstimated, initTaken});
+    size_t counter = 0;
+    while (!q.empty()) {
+      counter++;
+      auto cur = q.top();
+      q.pop();
+      if (cur.value > bestValue) {
+        bestValue = cur.value;
+        bestTaken = cur.taken;
+      }
+      size_t ind = cur.taken.size();
+      if (cur.estimate < bestValue || items.size() == ind ||
+          counter >= maxCounter) {
+        continue;
+      }
+      auto tmp = cur.taken;
+      if (cur.room >= items[ind].weight) {
+        tmp.push_back(true);
+        q.push({cur.value + items[ind].value, cur.room - items[ind].weight,
+                cur.estimate, tmp});
+        tmp.pop_back();
+      }
+      tmp.push_back(false);
+      q.push({cur.value, cur.room, cur.estimate - items[ind].value, tmp});
     }
-    auto tmp = cur.taken;
-    if (cur.room >= items[ind].weight) {
-      tmp.push_back(true);
-      q.push({cur.value + items[ind].value, cur.room - items[ind].weight,
-              estimated, tmp});
-      tmp.pop_back();
-    }
-    tmp.push_back(false);
-    q.push({cur.value, cur.room, estimated - items[ind].value, tmp});
-  }
+  } while (std::prev_permutation(initTaken.begin(), initTaken.end()));
   while (bestTaken.size() != items.size()) {
     bestTaken.push_back(false);
   }
@@ -167,6 +202,10 @@ Solution smartSearch(std::vector<Item>& items, uint64_t capacity) {
     taken[items[i].index] = bestTaken[i];
   }
   return {bestValue, false, taken};
+}
+
+Solution GetBestSolution(const Solution& s1, const Solution& s2) {
+  return (s1.value > s2.value ? s1 : s2);
 }
 
 Solution solve(std::istream& in) {
@@ -184,11 +223,11 @@ Solution solve(std::istream& in) {
     return bruteForceSolution(items, capacity);
   }
 
-  if (itemCount * capacity < 5e7) {
+  if (itemCount * capacity <= 200'000'000) {
     return dpSolution(items, capacity);
   }
-  return smartSearch(items, capacity);
-  return defaultSolution(items, capacity);
+  return GetBestSolution(smartSearch(items, capacity),
+                         smartSearch(items, capacity, 0, 1e7));
 }
 
 int main(int argc, char* argv[]) {
