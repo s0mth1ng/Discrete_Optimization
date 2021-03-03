@@ -300,7 +300,7 @@ def basic_prompt():
     Returns:
         the user's login and token
     '''
-    login = input('User Name (e-mail address): ')
+    login = 'ivanov.mi@phystech.edu' # input('User Name (e-mail address): ')
     token = input('Submission Token (from the assignment page): ')
     return login, token
 

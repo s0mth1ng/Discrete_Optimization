@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "ortools/constraint_solver/constraint_solver.h"
 #include "ortools/graph/cliques.h"
 #include "ortools/graph/graph.h"
 #include "ortools/sat/cp_model.h"
@@ -84,18 +85,29 @@ Graph InputGraph(std::istream& in) {
 namespace operations_research {
 namespace sat {
 
-std::vector<size_t> FindColoring(const Graph& g, size_t numberOfColors) {
-  if (!numberOfColors) {
+bool FindColoring(const Graph& g,
+                  const std::vector<size_t>& clique, size_t maxColors,
+                  std::vector<size_t>& coloring, size_t &colorsUsed) {
+  size_t numberOfNodes = g.GetNumberOfNodes();
+  if (!numberOfNodes) {
     throw std::invalid_argument("Number of colors is positive number.");
   }
   CpModelBuilder cp_model;
-  Domain colors(0, numberOfColors - 1);
-  size_t numberOfNodes = g.GetNumberOfNodes();
+  Domain colors(0, maxColors - 1);
   std::vector<IntVar> nodes;
   for (size_t node = 0; node < numberOfNodes; ++node) {
     nodes.push_back(
         cp_model.NewIntVar(colors).WithName("x" + std::to_string(node)));
   }
+
+  // breaking symmetry
+  size_t cliqueColor = 0;
+  for (auto node : clique) {
+    cp_model.AddEquality(nodes[node], cliqueColor);
+    cliqueColor++;
+  }
+
+  // main constraints of coloring problem
   for (size_t node = 0; node < numberOfNodes; ++node) {
     for (auto to : g.GetNeighbors(node)) {
       if (node < to) {
@@ -103,9 +115,19 @@ std::vector<size_t> FindColoring(const Graph& g, size_t numberOfColors) {
       }
     }
   }
+  
+  // Constraint for minimizing number of colors
+  IntVar maxColor = cp_model.NewIntVar({cliqueColor - 1, maxColors - 1});
+  cp_model.AddMaxEquality(maxColor, nodes);
+  cp_model.Minimize(maxColor);
+
+  // TODO: constraints for all colors used
+  
+  // model 
   Model model;
-  std::vector<size_t> coloring(numberOfNodes);
   model.Add(NewFeasibleSolutionObserver([&](const CpSolverResponse& response) {
+    colorsUsed = SolutionIntegerValue(response, maxColor) + 1;
+    std::cerr << "Coloring in " << colorsUsed << " colors found!" << std::endl;
     for (size_t node = 0; node < numberOfNodes; ++node) {
       coloring[node] = SolutionIntegerValue(response, nodes[node]);
     }
@@ -113,22 +135,24 @@ std::vector<size_t> FindColoring(const Graph& g, size_t numberOfColors) {
 
   SatParameters parameters;
   parameters.set_enumerate_all_solutions(false);
+  parameters.set_max_time_in_seconds(60 * 5);
   model.Add(NewSatParameters(parameters));
   const CpSolverResponse response = SolveCpModel(cp_model.Build(), &model);
-  return coloring;
+  return (response.status() == CpSolverStatus::FEASIBLE ||
+          response.status() == CpSolverStatus::OPTIMAL);
 }
 
 }  // namespace sat
 
 std::vector<size_t> FindMaxClique(const Graph& g) {
-  BronKerboschAlgorithm<size_t>::IsArcCallback gCall = [&g](size_t node1, size_t node2) {
-    return g.IsEdge(node1, node2);
-  };
+  BronKerboschAlgorithm<size_t>::IsArcCallback gCall =
+      [&g](size_t node1, size_t node2) { return g.IsEdge(node1, node2); };
   std::vector<size_t> clique;
-  BronKerboschAlgorithm<size_t>::CliqueCallback cCall = [&clique](const std::vector<size_t> &nodes) {
-    clique = nodes;
-    return operations_research::CliqueResponse::STOP;
-  };
+  BronKerboschAlgorithm<size_t>::CliqueCallback cCall =
+      [&clique](const std::vector<size_t>& nodes) {
+        clique = nodes;
+        return CliqueResponse::STOP;
+      };
   BronKerboschAlgorithm<size_t> al(gCall, g.GetNumberOfNodes(), cCall);
   auto res = al.Run();
   return clique;
@@ -137,10 +161,20 @@ std::vector<size_t> FindMaxClique(const Graph& g) {
 
 void solve(std::istream& in, std::ostream& out) {
   Graph g = InputGraph(in);
+  size_t numberOfNodes = g.GetNumberOfNodes();
+  size_t numberOfEdges = g.GetNumberOfEdges();
   auto clique = operations_research::FindMaxClique(g);
-  auto coloring = operations_research::sat::FindColoring(g, 2);
-  for (auto i : coloring) {
-    out << i << ' ';
+  std::cerr << "Clique size: " << clique.size() << std::endl;
+  std::vector<size_t> coloring(numberOfNodes);
+  size_t colorsUsed = 0;
+  size_t maxColors = (size_t) (0.5 + std::sqrt(2 * numberOfEdges + 0.25)); // from wiki
+  maxColors = std::min(maxColors, 122lu);
+  bool found = operations_research::sat::FindColoring(g, clique, maxColors, coloring, colorsUsed);
+  if (found) {
+    out << colorsUsed << " 0\n";
+    for (auto i : coloring) {
+      out << i << ' ';
+    }
   }
 }
 
