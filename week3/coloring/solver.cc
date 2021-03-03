@@ -121,16 +121,23 @@ std::vector<size_t> FindColoring(const Graph& g, size_t numberOfColors) {
 }  // namespace sat
 
 std::vector<size_t> FindMaxClique(const Graph& g) {
-  /* TODO:
-   * Find max clique
-   * Use it for break symmetry
-   */
-  return {};
+  BronKerboschAlgorithm<size_t>::IsArcCallback gCall = [&g](size_t node1, size_t node2) {
+    return g.IsEdge(node1, node2);
+  };
+  std::vector<size_t> clique;
+  BronKerboschAlgorithm<size_t>::CliqueCallback cCall = [&clique](const std::vector<size_t> &nodes) {
+    clique = nodes;
+    return operations_research::CliqueResponse::STOP;
+  };
+  BronKerboschAlgorithm<size_t> al(gCall, g.GetNumberOfNodes(), cCall);
+  auto res = al.Run();
+  return clique;
 }
 }  // namespace operations_research
 
 void solve(std::istream& in, std::ostream& out) {
   Graph g = InputGraph(in);
+  auto clique = operations_research::FindMaxClique(g);
   auto coloring = operations_research::sat::FindColoring(g, 2);
   for (auto i : coloring) {
     out << i << ' ';
