@@ -86,8 +86,10 @@ namespace operations_research {
 namespace sat {
 
 bool FindColoring(const Graph& g,
-                  const std::vector<size_t>& clique, size_t maxColors,
-                  std::vector<size_t>& coloring, size_t &colorsUsed) {
+                  const std::vector<size_t>& clique,
+                  size_t maxColors,
+                  std::vector<size_t>& coloring,
+                  size_t& colorsUsed) {
   size_t numberOfNodes = g.GetNumberOfNodes();
   if (!numberOfNodes) {
     throw std::invalid_argument("Number of colors is positive number.");
@@ -115,15 +117,15 @@ bool FindColoring(const Graph& g,
       }
     }
   }
-  
+
   // Constraint for minimizing number of colors
   IntVar maxColor = cp_model.NewIntVar({cliqueColor - 1, maxColors - 1});
   cp_model.AddMaxEquality(maxColor, nodes);
   cp_model.Minimize(maxColor);
 
   // TODO: constraints for all colors used
-  
-  // model 
+
+  // model
   Model model;
   model.Add(NewFeasibleSolutionObserver([&](const CpSolverResponse& response) {
     colorsUsed = SolutionIntegerValue(response, maxColor) + 1;
@@ -159,23 +161,77 @@ std::vector<size_t> FindMaxClique(const Graph& g) {
 }
 }  // namespace operations_research
 
-void solve(std::istream& in, std::ostream& out) {
-  Graph g = InputGraph(in);
+std::optional<Solution> ConstraintProgrammingSolution(const Graph& g, size_t maxColors, size_t maxTimeInSeconds) {
   size_t numberOfNodes = g.GetNumberOfNodes();
   size_t numberOfEdges = g.GetNumberOfEdges();
   auto clique = operations_research::FindMaxClique(g);
   std::cerr << "Clique size: " << clique.size() << std::endl;
   std::vector<size_t> coloring(numberOfNodes);
   size_t colorsUsed = 0;
-  size_t maxColors = (size_t) (0.5 + std::sqrt(2 * numberOfEdges + 0.25)); // from wiki
-  maxColors = std::min(maxColors, 122lu);
-  bool found = operations_research::sat::FindColoring(g, clique, maxColors, coloring, colorsUsed);
+  maxColors = std::min((size_t)(0.5 + std::sqrt(2 * numberOfEdges + 0.25)), maxColors);
+  bool found = operations_research::sat::FindColoring(g, clique, maxColors,
+                                                      coloring, colorsUsed);
   if (found) {
-    out << colorsUsed << " 0\n";
-    for (auto i : coloring) {
-      out << i << ' ';
+    Solution solution;
+    solution.colorsCount = colorsUsed;
+    solution.isOptimal = false;
+    solution.coloring = coloring;
+    return solution;
+  }
+  return std::nullopt;
+}
+
+void StartColoring(const Graph &g, size_t start, Solution &solution) {
+  size_t numberOfNodes = g.GetNumberOfNodes();
+  std::unordered_set<size_t> prohibitedColors;
+  for (auto to : g.GetNeighbors(start)) {
+    if (solution.coloring[to] != numberOfNodes) {
+      prohibitedColors.insert(solution.coloring[to]);
     }
   }
+  for (size_t color = 0; color < numberOfNodes; ++color) {
+    if (!prohibitedColors.count(color)) {
+      solution.coloring[start] = color;
+      solution.colorsCount = std::max(solution.colorsCount, color);
+      break;
+    }
+  }
+  for (auto to : g.GetNeighbors(start)) {
+    if (solution.coloring[to] == numberOfNodes) {
+      StartColoring(g, to, solution);
+    }
+  }
+}
+
+Solution BruteForceSolution(const Graph &g) {
+  size_t numberOfNodes = g.GetNumberOfNodes();
+  size_t numberOfEdges = g.GetNumberOfEdges();
+  size_t nodeWithMostEdges = 0;
+  for (size_t node = 1; node < numberOfNodes; ++node) {
+    if (g.GetNeighbors(node).size() > g.GetNeighbors(nodeWithMostEdges).size()) {
+      nodeWithMostEdges = node;
+    }
+  }
+  Solution solution;
+  solution.coloring.resize(numberOfNodes, numberOfNodes);
+  solution.isOptimal = false;
+  solution.colorsCount = 0;
+  StartColoring(g, nodeWithMostEdges, solution);
+  return solution;
+}
+
+void solve(std::istream& in, std::ostream& out) {
+  Graph g = InputGraph(in);
+  Solution solution = BruteForceSolution(g);
+  size_t time = 60 * 5; // 5 minutes to all subtasks except 4th and 6th
+  if (g.GetNumberOfNodes() == 250 || g.GetNumberOfNodes() == 1000) {
+    time = 60 * 60; // 1 hour, cause why not?
+  }
+  auto cpSolution = ConstraintProgrammingSolution(g, solution.colorsCount, time);
+  if (cpSolution && cpSolution->colorsCount < solution.colorsCount) {
+    solution = *cpSolution;
+  }
+  out << solution;
 }
 
 int main(int argc, char* argv[]) {
