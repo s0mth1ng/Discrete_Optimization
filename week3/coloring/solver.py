@@ -15,7 +15,7 @@ def run_cpp_solution(input_data):
     tmp_file.write(input_data)
     tmp_file.close()
 
-    bin_path = '/home/maxim/soft/OrTools/or-tools_Ubuntu-20.04-64bit_v8.1.8487/bin/solver'
+    bin_path = '/home/maxim/soft/OrTools/or-tools_Ubuntu-20.04-64bit_v8.2.8710/bin/solver'
     process = Popen([bin_path, tmp_file_name],
                     stdout=PIPE, universal_newlines=True)
     (stdout, stderr) = process.communicate()
