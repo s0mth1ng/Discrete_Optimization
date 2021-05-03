@@ -82,7 +82,7 @@ def solve(facilities, customers):
             if int(attendance[j][i].solution_value()) == 1:
                 solution.attendance[i] = j
                 break
-    return str(s)
+    return str(solution)
 
 
 def solve_it(input_data):
