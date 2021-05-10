@@ -1,3 +1,5 @@
+#pragma once
+
 #include <pthread.h>
 #include <algorithm>
 #include <chrono>
@@ -83,19 +85,15 @@ class LocalSearchSolver {
     Solution FindSolution(size_t maxTimeInSeconds = 60 * 10) const {
         Solution current = GreedySolution();
         Solution best = current;
-        std::cerr << "Greedy solution found. Distance: " << std::fixed
-                  << current.distance << std::endl;
         StopWatch watch;
         watch.Start();
         bool running = true;
-        std::uniform_real_distribution<long double> unif_prob(0, 1);
         std::uniform_int_distribution<size_t> unif_ind(0, _pts.size() - 1);
         std::default_random_engine re;
-        const long double INIT_TEMP = _pts.size() * 500;
-        long double temp = INIT_TEMP;
-        long double alpha = 0.994;
         size_t it = 0;
         while (running) {
+            size_t duration = watch.GetDurationInMilliseconds();
+            running = (duration < 1000 * maxTimeInSeconds);
             size_t e1 = unif_ind(re);
             size_t e2 = unif_ind(re);
             if (e1 > e2) {
@@ -106,20 +104,14 @@ class LocalSearchSolver {
             }
             Vector::CoordType diff =
                 ComputeDifferenceAfterSwap(current, e1, e2);
-            long double prob = std::exp(diff / temp);
-            if (diff > 0 || unif_prob(re) < prob) {
+            if (diff > 0) {
                 current = MakeSwap(current, e1, e2);
                 current.distance -= diff;
                 if (current.distance < best.distance) {
                     best = current;
-                    std::cerr << "New distance found: " << std::fixed
-                              << best.distance << '\r';
                 }
                 it++;
-                temp = INIT_TEMP * alpha / it;
             }
-            size_t duration = watch.GetDurationInMilliseconds();
-            running = (duration < 1000 * maxTimeInSeconds);
         }
         return current;
     }

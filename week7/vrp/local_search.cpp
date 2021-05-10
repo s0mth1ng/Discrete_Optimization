@@ -1,11 +1,16 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <random>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+#include "TSPSolver.h"
 
 struct Point {
   double x;
@@ -80,18 +85,74 @@ public:
     }
   }
 
-  Solution FindSolution() { return GreedySolution(); }
+  Solution FindSolution() {
+    auto solution = GreedySolution();
+
+    std::cerr << "Initial value: " << solution.value << '\n';
+
+    // Local Search
+    size_t counter = 0;
+    for (auto &r : solution.routes) {
+      counter++;
+      std::cerr << std::setprecision(2) << std::fixed
+                << (counter * 100.0 / numberOfVehicles) << "%\r";
+      if (r.size() <= 2) {
+        continue;
+      }
+      // Compute old tour distance
+      double oldDistance = ComputeTourDistance(r);
+
+      // Run TSP solver to improve route
+      std::vector<Vector> pts(r.size() - 1);
+      for (size_t i = 0; i + 1 < r.size(); ++i) {
+        pts[i] =
+            Vector(warehouses[r[i]].location.x, warehouses[r[i]].location.y);
+      }
+      auto tspSolution = LocalSearchSolver(pts).FindSolution(10);
+      auto depoIt =
+          std::find(tspSolution.indices.begin(), tspSolution.indices.end(), 0);
+
+      // Update route
+      auto rCpy = r;
+      r.clear();
+      for (auto it = depoIt; it != tspSolution.indices.end(); ++it) {
+        r.push_back(rCpy[*it]);
+      }
+      for (auto it = tspSolution.indices.begin(); it != depoIt; ++it) {
+        r.push_back(rCpy[*it]);
+      }
+      r.push_back(0);
+
+      // Update value
+      solution.value -= oldDistance - tspSolution.distance;
+    }
+    std::cerr << '\n';
+    return solution;
+  }
 
 private:
   int numberOfVehicles;
   int capacity;
   std::vector<Warehouse> warehouses;
 
+  double ComputeTourDistance(const Solution::Route &route) const {
+    double distance = 0;
+    for (size_t i = 1; i < route.size(); ++i) {
+      distance += length(warehouses[route[i - 1]].location,
+                         warehouses[route[i]].location);
+    }
+    return distance;
+  }
+
   Solution GreedySolution() {
     Solution solution(numberOfVehicles);
-
+    auto warehousesCopy = warehouses;
+    sort(warehousesCopy.begin(), warehousesCopy.end(),
+         [](const Warehouse &w1, const Warehouse &w2) {
+           return w1.demand > w2.demand;
+         });
     std::vector<int> capacities(numberOfVehicles, capacity);
-    for (const auto &w : warehouses) {
+    for (const auto &w : warehousesCopy) {
       if (!w.index) {
         continue;
       }
@@ -105,10 +166,7 @@ private:
     }
     for (auto &r : solution.routes) {
       r.push_back(0);
-      for (size_t i = 1; i < r.size(); ++i) {
-        solution.value +=
-            length(warehouses[i - 1].location, warehouses[i].location);
-      }
+      solution.value += ComputeTourDistance(r);
     }
 
     return solution;
@@ -123,14 +181,19 @@ void solve(std::istream &in) {
 }
 
 int main(int argc, char *argv[]) {
-  if (argc != 2) {
-    std::cerr << "Usage: " << argv[0] << " <filename>\n";
+  if (argc < 2) {
+    std::cerr << "Usage: " << argv[0] << " test1 test2 ...\n";
     return EXIT_FAILURE;
   }
-  std::ifstream fin(argv[1]);
-  if (!fin) {
-    std::cerr << "File not found.\n";
-    return EXIT_FAILURE;
+
+  std::vector<std::string> files = {
+      "./data/vrp_16_3_1",   "./data/vrp_26_8_1",   "./data/vrp_51_5_1",
+      "./data/vrp_101_10_1", "./data/vrp_200_16_1", "./data/vrp_421_41_1"};
+
+  for (int i = 1; i < argc; ++i) {
+    int test = atoi(argv[i]);
+    std::cerr << "Running test " << test << '\n';
+    std::ifstream fin(files[test - 1]);
+    solve(fin);
   }
-  solve(fin);
 }
