@@ -85,6 +85,30 @@ public:
     }
   }
 
+  double UpdateRouteViaTSP(Solution::Route &route) {
+    // Run TSP solver to improve route
+    std::vector<Vector> pts(route.size() - 1);
+    for (size_t i = 0; i + 1 < route.size(); ++i) {
+      pts[i] = Vector(warehouses[route[i]].location.x,
+                      warehouses[route[i]].location.y);
+    }
+    auto tspSolution = LocalSearchSolver(pts).FindSolution(5);
+    auto depoIt =
+        std::find(tspSolution.indices.begin(), tspSolution.indices.end(), 0);
+
+    // Update route
+    auto rCpy = route;
+    route.clear();
+    for (auto it = depoIt; it != tspSolution.indices.end(); ++it) {
+      route.push_back(rCpy[*it]);
+    }
+    for (auto it = tspSolution.indices.begin(); it != depoIt; ++it) {
+      route.push_back(rCpy[*it]);
+    }
+    route.push_back(0);
+    return tspSolution.distance;
+  }
+
   Solution FindSolution() {
     auto solution = GreedySolution();
 
@@ -102,31 +126,86 @@ public:
       // Compute old tour distance
       double oldDistance = ComputeTourDistance(r);
 
-      // Run TSP solver to improve route
-      std::vector<Vector> pts(r.size() - 1);
-      for (size_t i = 0; i + 1 < r.size(); ++i) {
-        pts[i] =
-            Vector(warehouses[r[i]].location.x, warehouses[r[i]].location.y);
-      }
-      auto tspSolution = LocalSearchSolver(pts).FindSolution(10);
-      auto depoIt =
-          std::find(tspSolution.indices.begin(), tspSolution.indices.end(), 0);
-
-      // Update route
-      auto rCpy = r;
-      r.clear();
-      for (auto it = depoIt; it != tspSolution.indices.end(); ++it) {
-        r.push_back(rCpy[*it]);
-      }
-      for (auto it = tspSolution.indices.begin(); it != depoIt; ++it) {
-        r.push_back(rCpy[*it]);
-      }
-      r.push_back(0);
-
       // Update value
-      solution.value -= oldDistance - tspSolution.distance;
+      solution.value -= oldDistance - UpdateRouteViaTSP(r);
     }
     std::cerr << '\n';
+
+    // Random stuff
+    std::random_device rd;
+    std::mt19937 mt(rd());
+    std::uniform_int_distribution<size_t> rdVehicle(0, numberOfVehicles - 1);
+    std::uniform_int_distribution<> actionType(0, 1);
+
+    size_t nIters = 100'000;
+    for (size_t it = 0; it < nIters; ++it) {
+      size_t sourceVehicle = rdVehicle(mt);
+      if (solution.routes[sourceVehicle].size() < 3) {
+        continue;
+      }
+      size_t destinationVehicle = rdVehicle(mt);
+      if (actionType(mt)) { // trying make transfer
+        std::uniform_int_distribution<size_t> rdCustomer(
+            1, solution.routes[sourceVehicle].size() - 2);
+        size_t targetInd = rdCustomer(mt);
+        int whouse = solution.routes[sourceVehicle][targetInd];
+        int currentDemand = 0;
+        for (auto w : solution.routes[destinationVehicle]) {
+          currentDemand += warehouses[w].demand;
+        }
+        if (warehouses[whouse].demand + currentDemand <= capacity) {
+          auto copySolution = solution;
+          copySolution.routes[sourceVehicle].erase(
+              copySolution.routes[sourceVehicle].begin() + targetInd);
+          copySolution.routes[destinationVehicle].pop_back();
+          copySolution.routes[destinationVehicle].push_back(whouse);
+          copySolution.routes[destinationVehicle].push_back(0);
+          double oldDistance =
+              ComputeTourDistance(solution.routes[destinationVehicle]) +
+              ComputeTourDistance(solution.routes[sourceVehicle]);
+          double newDistance =
+              UpdateRouteViaTSP(copySolution.routes[destinationVehicle]) +
+              ComputeTourDistance(copySolution.routes[sourceVehicle]);
+          if (newDistance < oldDistance) {
+            copySolution.value = solution.value - oldDistance + newDistance;
+            solution = copySolution;
+            std::cerr << "New value found: " << solution.value << '\r';
+          }
+        }
+      } else if (solution.routes[destinationVehicle].size() > 2) { // swap
+        std::uniform_int_distribution<size_t> rdCustomerFromSource(
+            1, solution.routes[sourceVehicle].size() - 2);
+        std::uniform_int_distribution<size_t> rdCustomerFromDest(
+            1, solution.routes[destinationVehicle].size() - 2);
+        auto w1 = rdCustomerFromSource(mt);
+        auto w2 = rdCustomerFromDest(mt);
+        int currentDemand1 = 0, currentDemand2 = 0;
+        for (auto w : solution.routes[sourceVehicle]) {
+          currentDemand1 += warehouses[w].demand;
+        }
+        for (auto w : solution.routes[destinationVehicle]) {
+          currentDemand2 += warehouses[w].demand;
+        }
+        if (currentDemand1 + warehouses[w2].demand > capacity &&
+            currentDemand2 + warehouses[w1].demand > capacity) {
+          continue;
+        }
+        auto copySolution = solution;
+        std::swap(copySolution.routes[sourceVehicle][w1],
+                  copySolution.routes[destinationVehicle][w2]);
+        double oldDistance =
+            ComputeTourDistance(solution.routes[destinationVehicle]) +
+            ComputeTourDistance(solution.routes[sourceVehicle]);
+        double newDistance =
+            UpdateRouteViaTSP(copySolution.routes[destinationVehicle]) +
+            UpdateRouteViaTSP(copySolution.routes[sourceVehicle]);
+        if (newDistance < oldDistance) {
+          copySolution.value = solution.value - oldDistance + newDistance;
+          solution = copySolution;
+          std::cerr << "New value found: " << solution.value << '\r';
+        }
+      }
+    }
     return solution;
   }
 
